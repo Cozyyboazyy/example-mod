@@ -4,37 +4,31 @@
 
 using namespace geode::prelude;
 
-// Globaler Status für Mod & Buffer
+// Globaler Status
 static bool g_bufferModEnabled = false;
 static bool g_bufferedClickPending = false;
 static int g_bufferFramesRemaining = 0;
 
-// Maximale Frames, die im Voraus gepuffert werden dürfen (z. B. 4 Frames)
+// Maximale Frames für Vorab-Eingabe (3-5 Frames)
 constexpr int MAX_BUFFER_FRAMES = 4;
 
 class $modify(MyPlayLayer, PlayLayer) {
-    // Wird in jedem Game-Frame aufgerufen
     void update(float dt) {
         PlayLayer::update(dt);
 
-        // Wenn ein Buffer-Click wartet und die Mod aktiv ist
         if (g_bufferModEnabled && g_bufferedClickPending) {
-            auto player = m_player1;
-            
-            if (player) {
-                // Versuche den Sprung auszuführen (PlayLayer steuert das In-Game Handling)
-                this->pushButton(1, true);
+            // In GD 2.2 drückt man den Button am PlayerObject
+            if (m_player1) {
+                m_player1->pushButton(PlayerButton::Jump);
+            }
 
-                // Wenn der Spieler erfolgreich verarbeitet wurde oder das Fenster abläuft
-                g_bufferFramesRemaining--;
-                if (g_bufferFramesRemaining <= 0) {
-                    g_bufferedClickPending = false;
-                }
+            g_bufferFramesRemaining--;
+            if (g_bufferFramesRemaining <= 0) {
+                g_bufferedClickPending = false;
             }
         }
     }
 
-    // Wenn ein Level beendet/neugestartet wird, Buffer zurücksetzen
     void resetLevel() {
         PlayLayer::resetLevel();
         g_bufferedClickPending = false;
@@ -43,9 +37,9 @@ class $modify(MyPlayLayer, PlayLayer) {
 };
 
 class $modify(MyKeyboardDispatcher, CCKeyboardDispatcher) {
-    // Tastatureingaben abfangen (Toggle & Input-Buffering)
-    bool dispatchKeyboardMSG(enumKeyCodes key, bool isKeyDown, bool isKeyRepeat) {
-        // Toggle mit der Taste 'B'
+    // Hier ist der 4. Parameter timestamp (double) hinzugefügt
+    bool dispatchKeyboardMSG(enumKeyCodes key, bool isKeyDown, bool isKeyRepeat, double timestamp) {
+        // Toggle mit B
         if (key == KEY_B && isKeyDown && !isKeyRepeat) {
             g_bufferModEnabled = !g_bufferModEnabled;
             
@@ -54,13 +48,13 @@ class $modify(MyKeyboardDispatcher, CCKeyboardDispatcher) {
             return true;
         }
 
-        // Wenn Mod aktiv ist und die Leertaste / Pfeil-Nach-Oben gedrückt wird
+        // Buffer-Eingabe bei Leertaste oder Pfeil Oben
         if (g_bufferModEnabled && (key == KEY_Space || key == KEY_Up) && isKeyDown && !isKeyRepeat) {
             g_bufferedClickPending = true;
             g_bufferFramesRemaining = MAX_BUFFER_FRAMES;
         }
 
-        // Standard-Behandlung der Tasten
-        return CCKeyboardDispatcher::dispatchKeyboardMSG(key, isKeyDown, isKeyRepeat);
+        // Weiterleiten mit allen 4 Argumenten
+        return CCKeyboardDispatcher::dispatchKeyboardMSG(key, isKeyDown, isKeyRepeat, timestamp);
     }
 };
