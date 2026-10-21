@@ -4,63 +4,66 @@
 
 using namespace geode::prelude;
 
-// Globale Status-Variablen
-static bool g_bufferModEnabled = false;
-static std::vector<int> g_bufferFrameOptions = {1, 2, 4, 6, 8, 14, 16};
-static size_t g_currentOptionIndex = 2; // Startet bei 4 Frames (Index 2)
-static bool g_bufferedClickPending = false;
-static int g_bufferFramesRemaining = 0;
+// Status-Variablen für den Mod
+static bool g_bufferModEnabled = true;
+// Verfügbare Ticks/Frames zum Durchschalten (Off/0, 2, 4, 8, 16 Ticks)
+static std::vector<int> g_tickOptions = {0, 2, 4, 8, 16};
+static size_t g_currentTickIndex = 2; // Startet standardmäßig bei 4 Ticks
+
+// Puffer-Status pro Frame-Update
+static bool g_bufferedActionPending = false;
+static int g_ticksRemaining = 0;
 
 class $modify(MyPlayLayer, PlayLayer) {
     void update(float dt) {
         PlayLayer::update(dt);
 
-        // Wenn die Mod aktiv ist und ein Klick gepuffert wurde
-        if (g_bufferModEnabled && g_bufferedClickPending) {
+        // Wenn ein Input im Puffer wartet und Ticks aktiv sind
+        int activeTicks = g_tickOptions[g_currentTickIndex];
+        if (g_bufferModEnabled && activeTicks > 0 && g_bufferedActionPending) {
             if (m_player1) {
-                // Führt den Sprung/Wave-Click aus, sobald das eingestellte Frame-Fenster greift
+                // Führt den Sprung/Klick verlässlich aus
                 m_player1->pushButton(PlayerButton::Jump);
             }
 
-            g_bufferFramesRemaining--;
-            if (g_bufferFramesRemaining <= 0) {
-                g_bufferedClickPending = false;
+            g_ticksRemaining--;
+            if (g_ticksRemaining <= 0) {
+                g_bufferedActionPending = false;
             }
         }
     }
 
     void resetLevel() {
         PlayLayer::resetLevel();
-        g_bufferedClickPending = false;
-        g_bufferFramesRemaining = 0;
+        g_bufferedActionPending = false;
+        g_ticksRemaining = 0;
     }
 };
 
 class $modify(MyKeyboardDispatcher, CCKeyboardDispatcher) {
     bool dispatchKeyboardMSG(enumKeyCodes key, bool isKeyDown, bool isKeyRepeat, double timestamp) {
         
-        // 1. Mod Ein- und Ausschalten mit Taste 'B'
+        // Mit Taste 'B' durch die Ticks schalten
         if (key == KEY_B && isKeyDown && !isKeyRepeat) {
-            g_bufferModEnabled = !g_bufferModEnabled;
-            std::string statusMsg = g_bufferModEnabled ? "Buffer Mod: ON" : "Buffer Mod: OFF";
-            Notification::create(statusMsg, NotificationIcon::Info)->show();
+            g_currentTickIndex = (g_currentTickIndex + 1) % g_tickOptions.size();
+            int currentTicks = g_tickOptions[g_currentTickIndex];
+
+            std::string msg;
+            if (currentTicks == 0) {
+                msg = "Buffer Mod: OFF (Legit)";
+            } else {
+                msg = fmt::format("Buffer Mod: ON (Saved Ticks: {})", currentTicks);
+            }
+            
+            Notification::create(msg, NotificationIcon::Info)->show();
             return true;
         }
 
-        // 2. Frames durchschalten mit Taste 'T' (1, 2, 4, 6, 8, 14, 16)
-        if (key == KEY_T && isKeyDown && !isKeyRepeat) {
-            g_currentOptionIndex = (g_currentOptionIndex + 1) % g_bufferFrameOptions.size();
-            int currentFrames = g_bufferFrameOptions[g_currentOptionIndex];
-
-            std::string frameMsg = fmt::format("Buffer Frames: {} F", currentFrames);
-            Notification::create(frameMsg, NotificationIcon::Success)->show();
-            return true;
-        }
-
-        // 3. Klick abfangen und puffern basierend auf den ausgewählten Frames
-        if (g_bufferModEnabled && (key == KEY_Space || key == KEY_Up) && isKeyDown && !isKeyRepeat) {
-            g_bufferedClickPending = true;
-            g_bufferFramesRemaining = g_bufferFrameOptions[g_currentOptionIndex];
+        // Wenn der Spieler klickt (Leertaste / Pfeil hoch), wird der Input abgefangen und gepuffert
+        int activeTicks = g_tickOptions[g_currentTickIndex];
+        if (g_bufferModEnabled && activeTicks > 0 && (key == KEY_Space || key == KEY_Up) && isKeyDown && !isKeyRepeat) {
+            g_bufferedActionPending = true;
+            g_ticksRemaining = activeTicks;
         }
 
         return CCKeyboardDispatcher::dispatchKeyboardMSG(key, isKeyDown, isKeyRepeat, timestamp);
