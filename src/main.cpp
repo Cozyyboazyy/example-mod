@@ -1,47 +1,66 @@
 #include <Geode/Geode.hpp>
-#include <Geode/modify/GJBaseGameLayer.hpp>
+#include <Geode/modify/PlayLayer.hpp>
 #include <Geode/modify/CCKeyboardDispatcher.hpp>
 
 using namespace geode::prelude;
 
-static bool g_bufferEnabled = false;
+// Globaler Status für Mod & Buffer
+static bool g_bufferModEnabled = false;
+static bool g_bufferedClickPending = false;
+static int g_bufferFramesRemaining = 0;
 
-class $modify(BufferKeys, CCKeyboardDispatcher) {
-    bool dispatchKeyboardMSG(enumKeyCodes key, bool down, bool repeat, double timestamp) {
-        if (down && !repeat && key == KEY_Add) {
-            g_bufferEnabled = !g_bufferEnabled;
-            log::info("Input Buffer: {}", g_bufferEnabled ? "AN" : "AUS");
+// Maximale Frames, die im Voraus gepuffert werden dürfen (z. B. 4 Frames)
+constexpr int MAX_BUFFER_FRAMES = 4;
+
+class $modify(MyPlayLayer, PlayLayer) {
+    // Wird in jedem Game-Frame aufgerufen
+    void update(float dt) {
+        PlayLayer::update(dt);
+
+        // Wenn ein Buffer-Click wartet und die Mod aktiv ist
+        if (g_bufferModEnabled && g_bufferedClickPending) {
+            auto player = m_player1;
+            
+            if (player) {
+                // Versuche den Sprung auszuführen (PlayLayer steuert das In-Game Handling)
+                this->pushButton(1, true);
+
+                // Wenn der Spieler erfolgreich verarbeitet wurde oder das Fenster abläuft
+                g_bufferFramesRemaining--;
+                if (g_bufferFramesRemaining <= 0) {
+                    g_bufferedClickPending = false;
+                }
+            }
         }
-        return CCKeyboardDispatcher::dispatchKeyboardMSG(key, down, repeat, timestamp);
+    }
+
+    // Wenn ein Level beendet/neugestartet wird, Buffer zurücksetzen
+    void resetLevel() {
+        PlayLayer::resetLevel();
+        g_bufferedClickPending = false;
+        g_bufferFramesRemaining = 0;
     }
 };
 
-class $modify(BufferLayer, GJBaseGameLayer) {
-    struct Fields {
-        bool queued = false;
-    };
-
-    void handleButton(bool down, int button, bool isPlayer1) {
-        if (g_bufferEnabled && isPlayer1 && button == 1) {
-            if (down) {
-                // Klick in der Luft: merken statt auslösen
-                if (m_player1 && !m_player1->m_isOnGround) {
-                    m_fields->queued = true;
-                    return;
-                }
-            } else {
-                // Losgelassen: gemerkten Klick verwerfen
-                m_fields->queued = false;
-            }
+class $modify(MyKeyboardDispatcher, CCKeyboardDispatcher) {
+    // Tastatureingaben abfangen (Toggle & Input-Buffering)
+    bool dispatchKeyboardMSG(enumKeyCodes key, bool isKeyDown, bool isKeyRepeat) {
+        // Toggle mit der Taste 'B'
+        if (key == KEY_B && isKeyDown && !isKeyRepeat) {
+            g_bufferModEnabled = !g_bufferModEnabled;
+            
+            std::string msg = g_bufferModEnabled ? "Buffer Mod: ON" : "Buffer Mod: OFF";
+            Notification::create(msg, NotificationIcon::Info)->show();
+            return true;
         }
-        GJBaseGameLayer::handleButton(down, button, isPlayer1);
-    }
 
-    void processCommands(float dt, bool isHalfTick, bool isLastTick) {
-        GJBaseGameLayer::processCommands(dt, isHalfTick, isLastTick);
-        if (g_bufferEnabled && m_fields->queued && m_player1 && m_player1->m_isOnGround) {
-            m_fields->queued = false;
-            GJBaseGameLayer::handleButton(true, 1, true);  // beim Landen auslösen
+        // Wenn Mod aktiv ist und die Leertaste / Pfeil-Nach-Oben gedrückt wird
+        if (g_bufferModEnabled && (key == KEY_Space || key == KEY_Up) && isKeyDown && !isKeyRepeat) {
+            g_bufferedClickPending = true;
+            g_bufferFramesRemaining = MAX_BUFFER_FRAMES;
         }
+
+        // Standard-Behandlung der Tasten
+        return CCKeyboardDispatcher::dispatchKeyboardMSG(key, isKeyDown, isKeyRepeat);
     }
 };
