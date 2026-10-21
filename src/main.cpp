@@ -7,12 +7,12 @@ using namespace geode::prelude;
 static bool g_bufferEnabled = false;
 
 class $modify(BufferKeys, CCKeyboardDispatcher) {
-    bool dispatchKeyboardMSG(enumKeyCodes key, bool down, bool repeat) {
+    bool dispatchKeyboardMSG(enumKeyCodes key, bool down, bool repeat, double timestamp) {
         if (down && !repeat && key == KEY_Add) {
             g_bufferEnabled = !g_bufferEnabled;
             log::info("Input Buffer: {}", g_bufferEnabled ? "AN" : "AUS");
         }
-        return CCKeyboardDispatcher::dispatchKeyboardMSG(key, down, repeat);
+        return CCKeyboardDispatcher::dispatchKeyboardMSG(key, down, repeat, timestamp);
     }
 };
 
