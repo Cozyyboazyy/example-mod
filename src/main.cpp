@@ -1,71 +1,74 @@
+// Input-Buffer-Mod (Geode SDK) - Grundgeruest, nur fuer private/offline Nutzung.
+// WICHTIG: Signaturen (handleButton, processCommands) gegen die Bindings deiner
+// GD/Geode-Version pruefen. Dieser Code ist nicht kompiliert/getestet.
+
 #include <Geode/Geode.hpp>
-#include <Geode/modify/PlayLayer.hpp>
-#include <Geode/modify/CCKeyboardDispatcher.hpp>
+#include <Geode/modify/GJBaseGameLayer.hpp>
+#include <deque>
 
 using namespace geode::prelude;
 
-// Status-Variablen für den Mod
-static bool g_bufferModEnabled = true;
-// Verfügbare Ticks/Frames zum Durchschalten (Off/0, 2, 4, 8, 16 Ticks)
-static std::vector<int> g_tickOptions = {0, 2, 4, 8, 16};
-static size_t g_currentTickIndex = 2; // Startet standardmäßig bei 4 Ticks
+struct BufferedInput {
+    bool down;        // true = Druecken, false = Loslassen
+    int button;       // PlayerButton (Jump = 1, Left = 2, Right = 3)
+    bool isPlayer1;
+    int ticksWaited = 0;
+};
 
-// Puffer-Status pro Frame-Update
-static bool g_bufferedActionPending = false;
-static int g_ticksRemaining = 0;
+static std::deque<BufferedInput> g_queue;
+static bool g_injecting = false; // verhindert, dass wir uns selbst abfangen
 
-class $modify(MyPlayLayer, PlayLayer) {
-    void update(float dt) {
-        PlayLayer::update(dt);
+// Platzhalter: Hier muesste die Vorhersage rein, ob die Aktion JETZT sicher ist.
+// Eine echte Version muesste den Spieler (PlayerObject) einen oder mehrere Ticks
+// "trocken" vorwaerts simulieren (Position, Geschwindigkeit, Hitboxen von Hazards/
+// Solids pruefen) und den Zustand danach wiederherstellen.
+// Solange hier "true" steht, wird der Klick sofort durchgereicht.
+static bool isSafeToActNow(GJBaseGameLayer* layer, BufferedInput const& in) {
+    return true; // TODO: Vorhersage implementieren
+}
 
-        // Wenn ein Input im Puffer wartet und Ticks aktiv sind
-        int activeTicks = g_tickOptions[g_currentTickIndex];
-        if (g_bufferModEnabled && activeTicks > 0 && g_bufferedActionPending) {
-            if (m_player1) {
-                // Führt den Sprung/Klick verlässlich aus
-                m_player1->pushButton(PlayerButton::Jump);
-            }
-
-            g_ticksRemaining--;
-            if (g_ticksRemaining <= 0) {
-                g_bufferedActionPending = false;
-            }
+class $modify(BufferLayer, GJBaseGameLayer) {
+    void handleButton(bool down, int button, bool isPlayer1) {
+        auto mod = Mod::get();
+        if (g_injecting || !mod->getSettingValue<bool>("enabled")) {
+            return GJBaseGameLayer::handleButton(down, button, isPlayer1);
         }
+        // Nur im echten Level puffern, nicht im Editor
+        if (!typeinfo_cast<PlayLayer*>(this)) {
+            return GJBaseGameLayer::handleButton(down, button, isPlayer1);
+        }
+        g_queue.push_back({down, button, isPlayer1, 0});
     }
 
-    void resetLevel() {
-        PlayLayer::resetLevel();
-        g_bufferedActionPending = false;
-        g_ticksRemaining = 0;
+    void processCommands(float dt) {
+        auto window = static_cast<int>(Mod::get()->getSettingValue<int64_t>("buffer-ticks"));
+
+        while (!g_queue.empty()) {
+            auto& in = g_queue.front();
+            bool safe = isSafeToActNow(this, in);
+            bool expired = in.ticksWaited >= window;
+
+            if (!safe && !expired) {
+                in.ticksWaited++;
+                break; // Reihenfolge der Inputs beibehalten, naechsten Tick erneut versuchen
+            }
+
+            // sicher ODER Fenster abgelaufen -> Klick ausfuehren
+            g_injecting = true;
+            GJBaseGameLayer::handleButton(in.down, in.button, in.isPlayer1);
+            g_injecting = false;
+            g_queue.pop_front();
+        }
+
+        GJBaseGameLayer::processCommands(dt);
     }
 };
 
-class $modify(MyKeyboardDispatcher, CCKeyboardDispatcher) {
-    bool dispatchKeyboardMSG(enumKeyCodes key, bool isKeyDown, bool isKeyRepeat, double timestamp) {
-        
-        // Mit Taste 'B' durch die Ticks schalten
-        if (key == KEY_B && isKeyDown && !isKeyRepeat) {
-            g_currentTickIndex = (g_currentTickIndex + 1) % g_tickOptions.size();
-            int currentTicks = g_tickOptions[g_currentTickIndex];
-
-            std::string msg;
-            if (currentTicks == 0) {
-                msg = "Buffer Mod: OFF (Legit)";
-            } else {
-                msg = fmt::format("Buffer Mod: ON (Saved Ticks: {})", currentTicks);
-            }
-            
-            Notification::create(msg, NotificationIcon::Info)->show();
-            return true;
-        }
-
-        // Wenn der Spieler klickt (Leertaste / Pfeil hoch), wird der Input abgefangen und gepuffert
-        int activeTicks = g_tickOptions[g_currentTickIndex];
-        if (g_bufferModEnabled && activeTicks > 0 && (key == KEY_Space || key == KEY_Up) && isKeyDown && !isKeyRepeat) {
-            g_bufferedActionPending = true;
-            g_ticksRemaining = activeTicks;
-        }
-
-        return CCKeyboardDispatcher::dispatchKeyboardMSG(key, isKeyDown, isKeyRepeat, timestamp);
+// Queue beim Verlassen/Neustart eines Levels leeren
+#include <Geode/modify/PlayLayer.hpp>
+class $modify(BufferPlayLayer, PlayLayer) {
+    void resetLevel() {
+        g_queue.clear();
+        PlayLayer::resetLevel();
     }
 };
