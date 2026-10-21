@@ -18,33 +18,30 @@ class $modify(BufferKeys, CCKeyboardDispatcher) {
 
 class $modify(BufferLayer, GJBaseGameLayer) {
     struct Fields {
-        bool queuedP1 = false;
-        bool held = false;
+        bool queued = false;
     };
 
-    bool pushButton(int button, bool rightSide) {
-        if (!g_bufferEnabled || !m_player1)
-            return GJBaseGameLayer::pushButton(button, rightSide);
-
-        m_fields->held = true;
-        if (!m_player1->m_isOnGround) {
-            m_fields->queuedP1 = true;   // Klick merken
-            return false;
+    void handleButton(bool down, int button, bool isPlayer1) {
+        if (g_bufferEnabled && isPlayer1 && button == 1) {
+            if (down) {
+                // Klick in der Luft: merken statt auslösen
+                if (m_player1 && !m_player1->m_isOnGround) {
+                    m_fields->queued = true;
+                    return;
+                }
+            } else {
+                // Losgelassen: gemerkten Klick verwerfen
+                m_fields->queued = false;
+            }
         }
-        return GJBaseGameLayer::pushButton(button, rightSide);
+        GJBaseGameLayer::handleButton(down, button, isPlayer1);
     }
 
-    bool releaseButton(int button, bool rightSide) {
-        m_fields->held = false;
-        m_fields->queuedP1 = false;
-        return GJBaseGameLayer::releaseButton(button, rightSide);
-    }
-
-    void processCommands(float dt) {
-        GJBaseGameLayer::processCommands(dt);
-        if (g_bufferEnabled && m_fields->queuedP1 && m_player1 && m_player1->m_isOnGround) {
-            m_fields->queuedP1 = false;
-            GJBaseGameLayer::pushButton(1, true);  // beim Landen auslösen
+    void processCommands(float dt, bool isHalfTick, bool isLastTick) {
+        GJBaseGameLayer::processCommands(dt, isHalfTick, isLastTick);
+        if (g_bufferEnabled && m_fields->queued && m_player1 && m_player1->m_isOnGround) {
+            m_fields->queued = false;
+            GJBaseGameLayer::handleButton(true, 1, true);  // beim Landen auslösen
         }
     }
 };
